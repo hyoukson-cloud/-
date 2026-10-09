@@ -1,0 +1,143 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>태권도 안무 동선 에디터</title>
+<style>
+:root{--bg:#eef0f3;--pn:#fff;--tx:#1b2230;--mu:#667086;--bd:#d5dae3;--ac:#c8372d;--bl:#2a6fd0;--gr:#e7eaf0;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--pn:#1c212a;--tx:#e8ebf1;--mu:#8e97a8;--bd:#313846;--gr:#2a303b;--ac:#ef5a4d;--bl:#5b9bf0}}
+:root[data-theme="dark"]{--bg:#12151b;--pn:#1c212a;--tx:#e8ebf1;--mu:#8e97a8;--bd:#313846;--gr:#2a303b;--ac:#ef5a4d;--bl:#5b9bf0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Noto Sans KR","Malgun Gothic",sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:12px;display:grid;gap:10px}
+h1{font-size:18px;margin:0}
+.card{background:var(--pn);border:1px solid var(--bd);border-radius:8px;padding:10px}
+.views{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+canvas{width:100%;aspect-ratio:1;display:block;border-radius:4px;touch-action:none}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hd{margin-bottom:6px;color:var(--mu);font-size:13px}
+button,input,select{font:inherit;color:inherit;background:var(--gr);border:1px solid var(--bd);border-radius:6px;padding:4px 9px}
+button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--bl);outline-offset:1px}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+input[type=number]{width:72px}input[type=range]{flex:1;min-width:140px;padding:0}
+label{display:inline-flex;gap:5px;align-items:center}
+#pp{min-height:44px}
+</style></head><body><div class="wrap">
+<h1>태권도 안무 동선 에디터 <span style="font-weight:400;color:var(--mu);font-size:13px">프로토타입</span></h1>
+<div class="card row">
+<button class="p" id="bp">▶ 재생</button><button id="bq">⏸ 일시정지</button><button id="bs">■ 정지</button>
+<label>속도 <select id="sp"><option value=".25">0.25x</option><option value=".5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option></select></label>
+<label><input type="checkbox" id="lo"> 반복</label>
+<input type="range" id="tm" min="0" max="1" step="0.01" value="0" aria-label="타임라인"><span id="tt"></span>
+</div>
+<div class="card row" id="dn"></div>
+<div class="views">
+<div class="card"><div class="row hd">2D 평면 편집 — 빈 곳 클릭: 점 추가 · 드래그: 이동
+<label>매트 <input type="number" id="M" min="4" max="30" value="10"> m</label><label><input type="checkbox" id="sn" checked> 0.5m 스냅</label></div><canvas id="c2"></canvas></div>
+<div class="card"><div class="hd">3D 장면 — 드래그: 회전 · 휠: 확대/축소</div><canvas id="c3"></canvas></div>
+</div>
+<div class="card row" id="pp"></div>
+<div class="row"><button id="sv">저장</button><button id="ld">불러오기</button><button id="ex">예시 안무</button><button id="cl">선택 인원 경로 지우기</button><span id="st" style="color:var(--mu)"></span></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const COL=['#e0402f','#2a6fd0','#2f9e5a','#e0a21b','#8a4fd0','#e0589a','#1aa3b0','#7a5c3e'];
+const S={dancers:[{color:COL[0],pts:[],segs:[]}],cur:0,sel:null,t:0,play:false,M:10,drag:null,
+get pts(){return this.dancers[this.cur].pts},set pts(v){this.dancers[this.cur].pts=v},
+get segs(){return this.dancers[this.cur].segs},set segs(v){this.dancers[this.cur].segs=v}};
+function withD(k,f){const o=S.cur;S.cur=k;try{return f()}finally{S.cur=o}}
+const TT=()=>Math.max(1,...S.dancers.map((_,k)=>withD(k,()=>tl().T)));
+const c2=$('c2'),x2=c2.getContext('2d');let W=300;
+const cs=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sc=()=>W/S.M,P=(x,y)=>[x*sc(),y*sc()],rad=d=>d*Math.PI/180;
+const clamp=v=>Math.min(S.M,Math.max(0,v));
+const sn=v=>clamp($('sn').checked?Math.round(v*2)/2:Math.round(v*100)/100);
+const newSeg=()=>({type:'linear',dur:2,rot:0,jump:0,face:'heading',h:null});
+function hnd(i){const s=S.segs[i],a=S.pts[i],b=S.pts[i+1];if(!s.h){const dx=b.x-a.x,dy=b.y-a.y,l=Math.hypot(dx,dy)||1;s.h={x:(a.x+b.x)/2-dy/l*1.5,y:(a.y+b.y)/2+dx/l*1.5}}return s.h}
+function at(i,u){const s=S.segs[i],a=S.pts[i],b=S.pts[i+1];if(s.type=='curve'){const h=hnd(i),v=1-u;return{x:v*v*a.x+2*v*u*h.x+u*u*b.x,y:v*v*a.y+2*v*u*h.y+u*u*b.y}}return{x:a.x+(b.x-a.x)*u,y:a.y+(b.y-a.y)*u}}
+function hd(i,u){const p=at(i,Math.min(1,u+.01)),q=at(i,Math.max(0,u-.01));return Math.atan2(p.y-q.y,p.x-q.x)}
+function len(i){let L=0,p=at(i,0);for(let k=1;k<=24;k++){const q=at(i,k/24);L+=Math.hypot(q.x-p.x,q.y-p.y);p=q}return L}
+function tl(){let t=0,f=null;const it=[];S.pts.forEach((p,i)=>{const s=S.segs[i];if(f===null)f=s?hd(i,0):0;
+if(p.dwell>0){it.push({k:'d',i,t0:t,t1:t+p.dwell,f});t+=p.dwell}
+if(s){const f0=f;it.push({k:'s',i,t0:t,t1:t+s.dur,f:f0});t+=s.dur;f=(s.face=='heading'?hd(i,1):f0)+rad(s.rot)}});return{it,T:t}}
+function ev(t){if(!S.pts.length)return null;const{it}=tl();
+for(let n=0;n<it.length;n++){const o=it[n];if(t<=o.t1||n==it.length-1){const u=o.t1>o.t0?Math.min(1,Math.max(0,(t-o.t0)/(o.t1-o.t0))):1;
+if(o.k=='d'){const p=S.pts[o.i];return{x:p.x,y:p.y,a:o.f,j:0,mv:0}}
+const s=S.segs[o.i],q=at(o.i,u);return{x:q.x,y:q.y,a:(s.face=='heading'?hd(o.i,u):o.f)+rad(s.rot)*u,j:s.jump*4*u*(1-u),mv:1}}}
+const p=S.pts[0];return{x:p.x,y:p.y,a:0,j:0,mv:0}}
+function d2(){const w=W;x2.clearRect(0,0,w,w);x2.fillStyle=cs('--pn');x2.fillRect(0,0,w,w);
+x2.strokeStyle=cs('--bd');x2.lineWidth=1;x2.beginPath();for(let i=0;i<=S.M;i++){const v=i*sc();x2.moveTo(v,0);x2.lineTo(v,w);x2.moveTo(0,v);x2.lineTo(w,v)}x2.stroke();
+S.dancers.forEach((D,k)=>withD(k,()=>{const own=k==S.cur,ac=D.color,tx=D.color;x2.globalAlpha=own?1:.55;
+S.segs.forEach((s,i)=>{const sel=own&&S.sel&&S.sel.k=='s'&&S.sel.i==i;x2.strokeStyle=sel?ac:tx;x2.lineWidth=sel?3.5:2;x2.beginPath();
+for(let k=0;k<=30;k++){const q=at(i,k/30),[X,Y]=P(q.x,q.y);k?x2.lineTo(X,Y):x2.moveTo(X,Y)}x2.stroke();
+const m=at(i,.5),[X,Y]=P(m.x,m.y);x2.fillStyle=x2.strokeStyle;x2.save();x2.translate(X,Y);x2.rotate(hd(i,.5));x2.beginPath();x2.moveTo(8,0);x2.lineTo(-5,6);x2.lineTo(-5,-6);x2.fill();x2.restore();
+if(sel&&s.type=='curve'){const h=hnd(i),[hx,hy]=P(h.x,h.y),a=P(S.pts[i].x,S.pts[i].y),b=P(S.pts[i+1].x,S.pts[i+1].y);x2.setLineDash([4,4]);x2.lineWidth=1;x2.beginPath();x2.moveTo(a[0],a[1]);x2.lineTo(hx,hy);x2.lineTo(b[0],b[1]);x2.stroke();x2.setLineDash([]);x2.fillRect(hx-5,hy-5,10,10)}});
+S.pts.forEach((p,i)=>{const[X,Y]=P(p.x,p.y),sel=own&&S.sel&&S.sel.k=='p'&&S.sel.i==i;x2.fillStyle=sel?ac:cs('--pn');x2.strokeStyle=sel?ac:tx;x2.lineWidth=2;x2.beginPath();x2.arc(X,Y,11,0,7);x2.fill();x2.stroke();
+x2.fillStyle=sel?'#fff':tx;x2.font='bold 12px sans-serif';x2.textAlign='center';x2.textBaseline='middle';x2.fillText(i+1,X,Y)});
+const e=ev(S.t);if(e){const[X,Y]=P(e.x,e.y),bl=D.color;x2.fillStyle=bl;x2.strokeStyle=bl;x2.lineWidth=3;x2.beginPath();x2.arc(X,Y,7,0,7);x2.fill();x2.beginPath();x2.moveTo(X,Y);x2.lineTo(X+Math.cos(e.a)*20,Y+Math.sin(e.a)*20);x2.stroke()}x2.globalAlpha=1}))}
+/* 3D */
+const c3=$('c3'),R=new THREE.WebGLRenderer({canvas:c3,antialias:true,alpha:true}),sc3=new THREE.Scene(),cam=new THREE.PerspectiveCamera(50,1,.1,200);
+sc3.add(new THREE.AmbientLight(0xffffff,.75));const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(5,10,6);sc3.add(dl);
+const fl=new THREE.Group(),pl=new THREE.Group(),ch=new THREE.Group();sc3.add(fl,pl,ch);
+const cam3={az:.8,el:.7,d:13};
+function box(w,h,d,col,x,y,z,par){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color:col}));m.position.set(x,y,z);par.add(m);return m}
+function limb(w,h,col,y,z,par){const g=new THREE.Group();g.position.set(0,y,z);box(w,h,w,col,0,-h/2,0,g);par.add(g);return g}
+box(.26,.6,.42,0xffffff,0,1.1,0,ch);box(.28,.07,.43,0x111111,0,.88,0,ch);box(.22,.22,.22,0xf0c8a0,0,1.55,0,ch);box(.05,.05,.1,0xc8372d,.13,1.56,0,ch);
+const LL=limb(.15,.8,0xffffff,.8,.1,ch),RL=limb(.15,.8,0xffffff,.8,-.1,ch),LA=limb(.12,.55,0xffffff,1.38,.27,ch),RA=limb(.12,.55,0xffffff,1.38,-.27,ch);
+function floor(){while(fl.children.length)fl.remove(fl.children[0]);const M=S.M,m=new THREE.Mesh(new THREE.PlaneGeometry(M,M),new THREE.MeshLambertMaterial({color:0x2f5f9a}));m.rotation.x=-Math.PI/2;m.position.set(M/2,0,M/2);fl.add(m);
+const g=new THREE.GridHelper(M,M,0xffffff,0x8fb0d6);g.position.set(M/2,.01,M/2);fl.add(g);cam3.d=M*1.3}
+let pk='',pil=[];
+function bp(){while(pl.children.length)pl.remove(pl.children[0]);
+const key=S.dancers.map(d=>d.color).join();if(key!=pk){pk=key;while(ch.children.length)ch.remove(ch.children[0]);pil=S.dancers.map(d=>{const g=new THREE.Group(),m=new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,1.7,24),new THREE.MeshLambertMaterial({color:d.color}));m.position.y=.85;g.add(m);box(.16,.16,.16,0xffffff,.3,1.45,0,g);ch.add(g);return g})}
+S.dancers.forEach((D,k)=>withD(k,()=>{const col=new THREE.Color(D.color);S.segs.forEach((s,i)=>{const g=[];for(let q=0;q<=30;q++){const o=at(i,q/30);g.push(new THREE.Vector3(o.x,.04,o.y))}pl.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(g),new THREE.LineBasicMaterial({color:col})))});S.pts.forEach(p=>{const m=new THREE.Mesh(new THREE.SphereGeometry(.1),new THREE.MeshBasicMaterial({color:col}));m.position.set(p.x,.1,p.y);pl.add(m)})}))}
+function bpOld(){while(pl.children.length)pl.remove(pl.children[0]);
+S.segs.forEach((s,i)=>{const g=[];for(let k=0;k<=30;k++){const q=at(i,k/30);g.push(new THREE.Vector3(q.x,.04,q.y))}pl.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(g),new THREE.LineBasicMaterial({color:0xff5a4a})))});
+S.pts.forEach(p=>{const m=new THREE.Mesh(new THREE.SphereGeometry(.13),new THREE.MeshBasicMaterial({color:0xffd23f}));m.position.set(p.x,.13,p.y);pl.add(m)})}
+function d3(){const M=S.M;S.dancers.forEach((D,k)=>{const g=pil[k];if(!g)return;const e=withD(k,()=>ev(S.t));g.visible=!!e;if(e){g.position.set(e.x,e.j,e.y);g.rotation.y=-e.a}});
+
+const c=cam3,tx=M/2,tz=M/2;cam.position.set(tx+c.d*Math.cos(c.el)*Math.cos(c.az),c.d*Math.sin(c.el),tz+c.d*Math.cos(c.el)*Math.sin(c.az));cam.lookAt(tx,0,tz);R.render(sc3,cam)}
+let cd=null;c3.onpointerdown=e=>{cd=[e.clientX,e.clientY];c3.setPointerCapture(e.pointerId)};
+c3.onpointermove=e=>{if(!cd)return;cam3.az-=(e.clientX-cd[0])*.01;cam3.el=Math.min(1.5,Math.max(.1,cam3.el+(e.clientY-cd[1])*.01));cd=[e.clientX,e.clientY]};
+c3.onpointerup=()=>cd=null;c3.onwheel=e=>{e.preventDefault();cam3.d=Math.min(60,Math.max(3,cam3.d*(1+e.deltaY*.001)))};
+/* 편집 */
+function ptr(e){const r=c2.getBoundingClientRect();return[(e.clientX-r.left)/r.width*S.M,(e.clientY-r.top)/r.height*S.M]}
+c2.onpointerdown=e=>{const[mx,my]=ptr(e),tol=14/sc();
+if(S.sel&&S.sel.k=='s'&&S.segs[S.sel.i]&&S.segs[S.sel.i].type=='curve'){const h=hnd(S.sel.i);if(Math.hypot(h.x-mx,h.y-my)<tol){S.drag={k:'h',i:S.sel.i};c2.setPointerCapture(e.pointerId);return}}
+const i=S.pts.findIndex(p=>Math.hypot(p.x-mx,p.y-my)<tol);
+if(i>=0){S.sel={k:'p',i};S.drag={k:'p',i};c2.setPointerCapture(e.pointerId);pn();return}
+for(let j=0;j<S.segs.length;j++)for(let k=0;k<=20;k++){const q=at(j,k/20);if(Math.hypot(q.x-mx,q.y-my)<tol*.7){S.sel={k:'s',i:j};pn();return}}
+S.pts.push({x:sn(mx),y:sn(my),dwell:0});if(S.pts.length>1)S.segs.push(newSeg());S.sel={k:'p',i:S.pts.length-1};sy()};
+c2.onpointermove=e=>{if(!S.drag)return;const[mx,my]=ptr(e);if(S.drag.k=='p'){const p=S.pts[S.drag.i];p.x=sn(mx);p.y=sn(my)}else S.segs[S.drag.i].h={x:clamp(mx),y:clamp(my)};sy()};
+c2.onpointerup=()=>S.drag=null;
+function U(k,v){const p=S.pts[S.sel.i];p[k]=k=='dwell'?Math.max(0,+v):clamp(+v);sy()}
+function US(k,v){const i=S.sel.i,s=S.segs[i];if(k=='type'||k=='face')s[k]=v;else if(k=='spd')s.dur=Math.max(.1,len(i)/Math.max(.1,+v));else if(k=='dur')s.dur=Math.max(.1,+v);else s[k]=+v;sy()}
+function mv(d){const i=S.sel.i,j=i+d;if(j<0||j>=S.pts.length)return;[S.pts[i],S.pts[j]]=[S.pts[j],S.pts[i]];S.sel.i=j;sy()}
+function del(){const i=S.sel.i;S.pts.splice(i,1);if(S.pts.length<2)S.segs=[];else S.segs.splice(i==0?0:i-1,1);S.sel=null;sy()}
+function pn(){const s=S.sel,el=$('pp');
+if(!s||(s.k=='p'?!S.pts[s.i]:!S.segs[s.i])){el.innerHTML='<span style="color:var(--mu)">제어점이나 경로 구간을 클릭하면 속성 패널이 열립니다. 꺾은선은 직선 구간을 이어서 만들고, 곡선 구간은 사각 핸들로 곡률을 조절합니다.</span>';return}
+if(s.k=='p'){const p=S.pts[s.i];el.innerHTML=`<b>제어점 ${s.i+1}</b><label>x(m) <input type="number" step=".5" value="${p.x}" onchange="U('x',this.value)"></label><label>y(m) <input type="number" step=".5" value="${p.y}" onchange="U('y',this.value)"></label><label>정지 시간(s) <input type="number" step=".1" min="0" value="${p.dwell}" onchange="U('dwell',this.value)"></label><button onclick="mv(-1)">◀ 앞 순서</button><button onclick="mv(1)">뒤 순서 ▶</button><button onclick="del()">삭제</button>`;return}
+const g=S.segs[s.i],L=len(s.i);
+el.innerHTML=`<b>구간 ${s.i+1}→${s.i+2}</b><label>유형 <select onchange="US('type',this.value)"><option value="linear" ${g.type=='linear'?'selected':''}>직선</option><option value="curve" ${g.type=='curve'?'selected':''}>곡선</option></select></label><span>거리 ${L.toFixed(2)}m</span><label>시간(s) <input type="number" step=".1" value="${+g.dur.toFixed(2)}" onchange="US('dur',this.value)"></label><label>속도(m/s) <input type="number" step=".1" value="${+(L/g.dur).toFixed(2)}" onchange="US('spd',this.value)"></label><label>회전(°) <input type="number" step="45" value="${g.rot}" onchange="US('rot',this.value)"></label><label>몸 방향 <select onchange="US('face',this.value)"><option value="heading" ${g.face=='heading'?'selected':''}>진행 방향</option><option value="free" ${g.face=='free'?'selected':''}>고정(이동과 분리)</option></select></label><label>점프 높이(m) <input type="number" step=".1" min="0" value="${g.jump}" onchange="US('jump',this.value)"></label>`}
+function sy(){const T=TT();$('tm').max=T;S.t=Math.min(S.t,T);bp();pn();dn()}
+function pick(k){S.cur=k;S.sel=null;sy()}
+function addD(c){const n=S.dancers.length,D={color:COL[n%COL.length],pts:[],segs:[]};if(c){D.pts=S.pts.map(p=>({...p,x:clamp(p.x+1)}));D.segs=S.segs.map(s=>({...s,h:s.h?{x:clamp(s.h.x+1),y:s.h.y}:null}))}S.dancers.push(D);S.cur=n;S.sel=null;sy()}
+function colD(v){S.dancers[S.cur].color=v;sy()}
+function delD(){if(S.dancers.length<2)return;S.dancers.splice(S.cur,1);S.cur=0;S.sel=null;sy()}
+function dn(){$('dn').innerHTML=S.dancers.map((d,k)=>`<button onclick="pick(${k})" style="border:2px solid ${k==S.cur?d.color:'var(--bd)'};font-weight:${k==S.cur?700:400}"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${d.color};margin-right:5px"></span>${k+1}번</button>`).join('')+`<button onclick="addD()">+ 인원 추가</button><button onclick="addD(1)">복제 추가</button><label>색 <input type="color" value="${S.dancers[S.cur].color}" onchange="colD(this.value)"></label><button onclick="delD()">선택 인원 삭제</button>`}
+function ex(){const B=[{x:2,y:8,dwell:.5},{x:2,y:4,dwell:0},{x:5,y:2,dwell:0},{x:8,y:4,dwell:.5},{x:8,y:8,dwell:0}],G=[{...newSeg(),dur:2},{...newSeg(),type:'curve',dur:2.5},{...newSeg(),dur:2,face:'free'},{...newSeg(),dur:2.5,jump:.7,rot:360}];
+S.dancers=[-1.5,0,1.5].map((o,k)=>({color:COL[k],pts:B.map((p,j)=>({...p,x:p.x+o,dwell:p.dwell+(j==0?k*.4:0)})),segs:G.map(s=>({...s}))}));S.cur=0;S.sel=null;S.t=0;S.play=false;sy()}
+function exOld(){S.pts=[{x:2,y:8,dwell:.5},{x:2,y:4,dwell:0},{x:5,y:2,dwell:0},{x:8,y:4,dwell:.5},{x:8,y:8,dwell:0}].map(p=>p);
+S.segs=[{...newSeg(),dur:2},{...newSeg(),type:'curve',dur:2.5},{...newSeg(),dur:2,face:'free'},{...newSeg(),dur:2.5,jump:.7,rot:360}];S.sel=null;S.t=0;S.play=false;sy()}
+/* 재생 */
+$('bp').onclick=()=>{const T=TT();if(S.t>=T)S.t=0;S.play=true};$('bq').onclick=()=>S.play=false;$('bs').onclick=()=>{S.play=false;S.t=0;$('tm').value=0};
+$('tm').oninput=e=>{S.t=+e.target.value;S.play=false};
+$('M').onchange=e=>{S.M=Math.min(30,Math.max(4,+e.target.value||10));e.target.value=S.M;S.pts.forEach(p=>{p.x=clamp(p.x);p.y=clamp(p.y)});floor();sy()};
+const K='choreo-proto2';
+$('sv').onclick=()=>{try{localStorage.setItem(K,JSON.stringify({dancers:S.dancers,M:S.M}));$('st').textContent='저장했습니다'}catch(e){$('st').textContent='저장할 수 없습니다'}};
+$('ld').onclick=()=>{try{const d=JSON.parse(localStorage.getItem(K));if(!d)throw 0;Object.assign(S,{dancers:d.dancers,cur:0,M:d.M,sel:null,t:0,play:false});$('M').value=S.M;floor();sy();$('st').textContent='불러왔습니다'}catch(e){$('st').textContent='저장된 안무가 없습니다'}};
+$('ex').onclick=ex;$('cl').onclick=()=>{S.pts=[];S.segs=[];S.sel=null;S.t=0;S.play=false;sy()};
+function rz(){W=c2.clientWidth||300;const d=devicePixelRatio||1;c2.width=c2.height=Math.round(W*d);x2.setTransform(d,0,0,d,0,0);const w=c3.clientWidth||300;R.setPixelRatio(d);R.setSize(w,w,false)}
+addEventListener('resize',rz);rz();floor();ex();
+let last=performance.now();
+function lp(n){const dt=Math.min(.1,(n-last)/1000);last=n;const T=TT();
+if(S.play){S.t+=dt*+$('sp').value;if(S.t>=T){if($('lo').checked)S.t=0;else{S.t=T;S.play=false}}$('tm').value=S.t}
+$('tt').textContent=S.t.toFixed(1)+' / '+T.toFixed(1)+' s';d2();d3();requestAnimationFrame(lp)}
+requestAnimationFrame(lp);
+</script></body></html>
